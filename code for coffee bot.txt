@@ -1,0 +1,169 @@
+// See https://github.com/dialogflow/dialogflow-fulfillment-nodejs
+// for Dialogflow fulfillment library docs, samples, and to report issues
+'use strict';
+ 
+const functions = require('firebase-functions');
+const {WebhookClient} = require('dialogflow-fulfillment');
+const {Card, Suggestion} = require('dialogflow-fulfillment');
+
+// global variables
+
+let initialState = [500, 500, 300];
+let isMachineOff = false; 
+const expressoResource = [80, 200, 30];
+const latteResource = [100, 200, 50];
+const cappuccinoResource = [60, 150, 25];
+let moneyArray = [0.00, 2.50, 5.00, 4.00];
+const resourseMap = new Map([0,'water'], [1,'milk'], [2,'coffee']);
+const drinkMap = new Map(['expresso',1], ['latte',2], ['cappuccino',3]);
+let drinkResource;
+
+process.env.DEBUG = 'dialogflow:debug'; // enables lib debugging statements
+ 
+exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, response) => {
+  const agent = new WebhookClient({ request, response });
+  console.log('Dialogflow Request headers: ' + JSON.stringify(request.headers));
+  console.log('Dialogflow Request body: ' + JSON.stringify(request.body));
+ 
+  function welcome(agent) {
+    agent.add(`Welcome to my agent!`);
+  }
+ 
+  function fallback(agent) {
+    agent.add(`I didn't understand`);
+    agent.add(`I'm sorry, can you try again?`);
+  }
+
+// function to switch off coffee machine , map with switch off machine intent
+
+  function switchOffMachine(agent){
+
+    isMachineOff = true;
+    agent.add('Machine is turned off');
+
+  }
+
+// nothing should happen if the machine is turned off 
+
+// function to get report of resources , map with report intent
+
+  function getReport(agent){
+  
+    if(isMachineOff)
+      return;
+
+    agent.add('Water : ' + initialState[0] + 'ml , Milk : ' + initialState[1] + 'ml , Coffee : ' + initialState[2] + 'g , Money : $' + moneyArray[0]);
+
+  }
+
+
+// function to identify which drink resource will be used
+
+  function decideResource(agent){
+   
+    let drink = agent.parameters.drink;
+    
+    if(drink.includes('latte'))
+      drinkResource = latteResource;
+    else if(drink.includes('expresso'))
+      drinkResource = expressoResource;
+    else
+      drinkResource = cappuccinoResource;
+
+  }
+
+// function to check if resourses are available to make selected coffee , map with the intent that recognises drinks
+
+  function checkResources(agent){
+  
+    if(isMachineOff)
+      return;
+   
+    decideResource(agent);
+    
+    let index = 0;
+
+    for (index ; index < initialState.length ; index++){
+      
+      if(drinkResource[index] > initialState[index])
+        break;
+    }
+
+    if(index == initialState.length)
+      agent.add('Please insert coins to buy the drink');
+    else
+      agent.add('Sorry,there is not enough' + resourseMap.get(index));
+  }
+
+  
+  // function to check if money is enough and making transaction if it is , once transaction is made prompt for drinks again
+
+  function tryTransaction(agent){
+
+    if(isMachineOff)
+      return;
+
+    let inputMoney = agent.parameters.number;
+    let drink = agent.parameters.drink;
+    
+    if(inputMoney < moneyArray[drinkMap.get(drink)]){
+ 
+      agent.add('Sorry, that is not enough money. Money refunded.');
+      return;
+    }
+
+   moneyArray[0] = moneyArray[0] + moneyArray[drinkMap.get(drink)];
+   
+   for (let index = 0 ; index < initialState.length ; index++)
+     initialState[index] = initialState[index] - drinkResource[index];
+
+   agent.add('Here is your ' + drink + '. Enjoy!')
+   agent.add('What would you like? (expresso/latte/cappuccino)');
+
+  }
+
+  // // Uncomment and edit to make your own intent handler
+  // // uncomment `intentMap.set('your intent name here', yourFunctionHandler);`
+  // // below to get this function to be run when a Dialogflow intent is matched
+  // function yourFunctionHandler(agent) {
+  //   agent.add(`This message is from Dialogflow's Cloud Functions for Firebase editor!`);
+  //   agent.add(new Card({
+  //       title: `Title: this is a card title`,
+  //       imageUrl: 'https://developers.google.com/actions/images/badges/XPM_BADGING_GoogleAssistant_VER.png',
+  //       text: `This is the body text of a card.  You can even use line\n  breaks and emoji! 💁`,
+  //       buttonText: 'This is a button',
+  //       buttonUrl: 'https://assistant.google.com/'
+  //     })
+  //   );
+  //   agent.add(new Suggestion(`Quick Reply`));
+  //   agent.add(new Suggestion(`Suggestion`));
+  //   agent.setContext({ name: 'weather', lifespan: 2, parameters: { city: 'Rome' }});
+  // }
+
+  // // Uncomment and edit to make your own Google Assistant intent handler
+  // // uncomment `intentMap.set('your intent name here', googleAssistantHandler);`
+  // // below to get this function to be run when a Dialogflow intent is matched
+  // function googleAssistantHandler(agent) {
+  //   let conv = agent.conv(); // Get Actions on Google library conv instance
+  //   conv.ask('Hello from the Actions on Google client library!') // Use Actions on Google library
+  //   agent.add(conv); // Add Actions on Google library responses to your agent's response
+  // }
+  // // See https://github.com/dialogflow/fulfillment-actions-library-nodejs
+  // // for a complete Dialogflow fulfillment library Actions on Google client library v2 integration sample
+
+  // Run the proper function handler based on the matched Dialogflow intent name
+  let intentMap = new Map();
+  intentMap.set('Default Welcome Intent', welcome);
+  intentMap.set('Default Fallback Intent', fallback);
+  // intentMap.set('your intent name here', yourFunctionHandler);
+  // intentMap.set('your intent name here', googleAssistantHandler);
+
+  //mapping functions with intent
+
+  intentMap.set('SwitchOffMachine', switchOffMachine);
+  intentMap.set('ReportOfResourses', getReport);
+  intentMap.set('getDrink', checkResourses); 
+  intentMap.set('getMoney', tryTransaction);
+
+  agent.handleRequest(intentMap);
+});
